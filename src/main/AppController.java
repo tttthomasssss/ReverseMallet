@@ -1,6 +1,14 @@
 package main;
 
 import cc.mallet.classify.*;
+import cc.mallet.classify.constraints.ge.MaxEntFLGEConstraints;
+import cc.mallet.classify.constraints.ge.MaxEntGEConstraint;
+import cc.mallet.classify.constraints.ge.MaxEntKLFLGEConstraints;
+import cc.mallet.classify.constraints.ge.MaxEntL2FLGEConstraints;
+import cc.mallet.optimize.ConjugateGradient;
+import cc.mallet.optimize.GradientAscent;
+import cc.mallet.optimize.Optimizer;
+import cc.mallet.optimize.OrthantWiseLimitedMemoryBFGS;
 import cc.mallet.types.Instance;
 import cc.mallet.types.InstanceList;
 import cc.mallet.types.Multinomial;
@@ -50,6 +58,24 @@ public class AppController {
         // MaxEntGERangeTrainer
         //factory.setupMaxEntGERangeClassifier(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_RANGE_CONSTRAINTS_FILE, 1);
 
+        /**
+         * Lots of different MaxEntGETrainer trials...
+         */
+        ArrayList<MaxEntGEConstraint> constraints = this.createConstraints(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE, false, false, false);
+        MaxEntGETrainer meTrainer = new MaxEntGETrainer(constraints);
+
+        // Create Optimizer, needs an Optimizable as Argument, see MaxEntGETrainer getOptimizable() for what it does and takes, in essence it is a http://mallet.cs.umass.edu/api/cc/mallet/classify/MaxEntOptimizableByGE.html instance
+        Optimizer optimizer = new ConjugateGradient(meTrainer.getOptimizable(trainingData));
+        //Optimizer optimizer = new GradientAscent(meTrainer.getOptimizable(trainingData));
+        //Optimizer optimizer = new OrthantWiseLimitedMemoryBFGS(meTrainer.getOptimizable(trainingData)); // see http://research.microsoft.com/en-us/um/people/jfgao/paper/icml07scalable.pdf
+
+        meTrainer.setOptimizer(optimizer);
+
+        // TODO: Find out whether or not the optimizer needs to be reset before training
+        meModel = meTrainer.train(trainingData);
+
+        factory.putClassifier("maxEntGe-conjugateGradient", meModel);
+
 
 
         // ...AND FOR OTHER REASONS NORMAL MAXENT NEEDS LABELED TRAINING DATA
@@ -60,7 +86,7 @@ public class AppController {
         //factory.setupMaxEntClassifier(trainingData, 1);
 
 
-
+        // Print Metrics
         HashMap<String, Double> metrics = factory.classifyAll(testingData);
 
         for (String key : metrics.keySet()) {
@@ -105,6 +131,49 @@ public class AppController {
         trainingAndTestingData[1] = testingData;
 
         return trainingAndTestingData;
+    }
+
+    private ArrayList<MaxEntGEConstraint> createConstraints(InstanceList trainingData, String constraintsFile, boolean useValues, boolean l2, boolean normalize)
+    {
+        /**
+         * In order to use a different Optimizer, we need to create the constraints ourselves
+         * The default implementation of MaxEntGETrainer simply creates LimitedMemoryBFGS Optimizer
+         * directly in the train method (which is a bit annoying).
+         * As the constraints are also created in the train method, we first have to create the constraints
+         * and then create an Optimizer.
+         *
+         * In case L2 penalty is enabled (see http://people.cs.umass.edu/~mccallum/papers/druck08sigir.pdf & http://mallet.cs.umass.edu/ge-classification.php for more info)
+         * use MaxEntL2FLGEConstraints: http://mallet.cs.umass.edu/api/cc/mallet/classify/constraints/ge/MaxEntKLFLGEConstraints.html
+         *      Constructor: numFeatures, numLabels, useValues, normalize
+         *
+         * otherwise use MaxEntKLFLGEConstraints: http://mallet.cs.umass.edu/api/cc/mallet/classify/constraints/ge/MaxEntKLFLGEConstraints.html
+         *      Constructor: numFeatures, numLabels, useValues
+         */
+
+        // Read the Constraints from File
+        HashMap<Integer, double[]> constraintsMap = FeatureConstraintUtil.readConstraintsFromFile(constraintsFile, trainingData);
+
+        // Initialise Constraints
+        ArrayList<MaxEntGEConstraint> constraints = new ArrayList<MaxEntGEConstraint>();
+        MaxEntFLGEConstraints geConstraints = null;
+
+        // Create Constraints
+        if (l2) {
+            geConstraints = new MaxEntL2FLGEConstraints(trainingData.getDataAlphabet().size(), trainingData.getTargetAlphabet().size(), useValues, normalize);
+            for (int fi : constraintsMap.keySet()) {
+                geConstraints.addConstraint(fi, constraintsMap.get(fi), 1);
+            }
+            constraints.add(geConstraints);
+        } else {
+            geConstraints = new MaxEntKLFLGEConstraints(trainingData.getDataAlphabet().size(), trainingData.getTargetAlphabet().size(), useValues);
+            for (int fi : constraintsMap.keySet()) {
+                geConstraints.addConstraint(fi, constraintsMap.get(fi), 1);
+            }
+        }
+
+        constraints.add(geConstraints);
+
+        return constraints;
     }
 
     public void stop(int exitCode)
