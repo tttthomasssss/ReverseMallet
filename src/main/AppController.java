@@ -53,28 +53,59 @@ public class AppController {
         InstanceList trainingData = allData[0];
         InstanceList testingData = allData[1];
 
-        MaxEnt meModel = factory.setupMaxEntGEClassifier(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE, 1);
+        // MaxEntGEConstraints
+        ArrayList<MaxEntGEConstraint> constraints = this.createConstraints(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE, false, false, false); // seems to work better without L2 penalty and useValues and normalize
+
+        // MaxEntGETrainer, LimitedMemoryBFGS optimizer
+        MaxEnt meModel = factory.setupMaxEntGEClassifier(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE, 1.0);
 
         // MaxEntGERangeTrainer
         //factory.setupMaxEntGERangeClassifier(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_RANGE_CONSTRAINTS_FILE, 1);
 
-        /**
-         * Lots of different MaxEntGETrainer trials...
-         */
-        ArrayList<MaxEntGEConstraint> constraints = this.createConstraints(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE, false, false, false);
+        // MaxEntGETrainer, ConjugateGradient optimizer
         MaxEntGETrainer meTrainer = new MaxEntGETrainer(constraints);
+        meTrainer.setGaussianPriorVariance(1.0);
+        meTrainer.setTemperature(2.0);
 
         // Create Optimizer, needs an Optimizable as Argument, see MaxEntGETrainer getOptimizable() for what it does and takes, in essence it is a http://mallet.cs.umass.edu/api/cc/mallet/classify/MaxEntOptimizableByGE.html instance
         Optimizer optimizer = new ConjugateGradient(meTrainer.getOptimizable(trainingData));
-        //Optimizer optimizer = new GradientAscent(meTrainer.getOptimizable(trainingData));
-        //Optimizer optimizer = new OrthantWiseLimitedMemoryBFGS(meTrainer.getOptimizable(trainingData)); // see http://research.microsoft.com/en-us/um/people/jfgao/paper/icml07scalable.pdf
-
         meTrainer.setOptimizer(optimizer);
 
-        // TODO: Find out whether or not the optimizer needs to be reset before training
         meModel = meTrainer.train(trainingData);
-
         factory.putClassifier("maxEntGe-conjugateGradient", meModel);
+
+        // MaxEntGETrainer, GradientAscent Optimizer
+        meTrainer = new MaxEntGETrainer(constraints);
+        meTrainer.setGaussianPriorVariance(1.0);
+        meTrainer.setTemperature(2.0);
+
+        optimizer = new GradientAscent(meTrainer.getOptimizable(trainingData));
+        meTrainer.setOptimizer(optimizer);
+
+        meModel = meTrainer.train(trainingData);
+        factory.putClassifier("maxEntGE-gradientAscent", meModel);
+
+        // MaxEntGETrainer, OrthantWiseLimitedMemoryBFGS optimizer
+        meTrainer = new MaxEntGETrainer(constraints);
+        meTrainer.setGaussianPriorVariance(1.0);
+        meTrainer.setTemperature(2.0);
+
+        optimizer = new OrthantWiseLimitedMemoryBFGS(meTrainer.getOptimizable(trainingData)); // see http://research.microsoft.com/en-us/um/people/jfgao/paper/icml07scalable.pdf
+        meTrainer.setOptimizer(optimizer);
+
+        meModel = meTrainer.train(trainingData);
+        factory.putClassifier("maxEntGE-orthantWiseLimitedMemoryBFGS", meModel);
+
+        // Normal LimitedMemoryBFGS seems to work best
+
+        // MaxEntPRTrainer Setups
+        MaxEntPRTrainer prTrainer = new MaxEntPRTrainer();
+        prTrainer.setConstraintsFile(BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE);
+        prTrainer.setPGaussianPriorVariance(0.0001);
+        prTrainer.setQGaussianPriorVariance(1000000);
+
+        meModel = prTrainer.train(trainingData);
+        factory.putClassifier("maxEntPR", meModel);
 
 
 

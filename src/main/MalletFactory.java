@@ -35,6 +35,11 @@ public class MalletFactory {
         this.classifiers = new HashMap<String, Classifier>();
     }
 
+    public void putClassifier(String key, Classifier c)
+    {
+        this.classifiers.put(key, c);
+    }
+
     public MaxEnt setupMaxEntGERangeClassifier(InstanceList trainingData, String constraintsFile, double gaussianPriorVariance)
     {
         // Setup Trainer
