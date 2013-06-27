@@ -57,7 +57,7 @@ public class AppController {
         ArrayList<MaxEntGEConstraint> constraints = this.createConstraints(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE, false, false, false); // seems to work better without L2 penalty and useValues and normalize
 
         // MaxEntGETrainer, LimitedMemoryBFGS optimizer
-        MaxEnt meModel = factory.setupMaxEntGEClassifier(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE, 1.0);
+        MaxEnt meModel = factory.setupMaxEntGEClassifier(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_CONSTRAINTS_FILE, 1.0, 1.0, false);
 
         // MaxEntGERangeTrainer
         //factory.setupMaxEntGERangeClassifier(trainingData, BASE_DATA_FOLDER + BASEBALL_HOCKEY_RANGE_CONSTRAINTS_FILE, 1);
@@ -88,7 +88,7 @@ public class AppController {
         // MaxEntGETrainer, OrthantWiseLimitedMemoryBFGS optimizer
         meTrainer = new MaxEntGETrainer(constraints);
         meTrainer.setGaussianPriorVariance(1.0);
-        meTrainer.setTemperature(2.0);
+        meTrainer.setTemperature(1.0);
 
         optimizer = new OrthantWiseLimitedMemoryBFGS(meTrainer.getOptimizable(trainingData)); // see http://research.microsoft.com/en-us/um/people/jfgao/paper/icml07scalable.pdf
         meTrainer.setOptimizer(optimizer);

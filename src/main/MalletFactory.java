@@ -55,14 +55,15 @@ public class MalletFactory {
         return meModel;
     }
 
-    public MaxEnt setupMaxEntGEClassifier(InstanceList trainingData, String constraintsFile, double gaussianPriorVariance)
+    public MaxEnt setupMaxEntGEClassifier(InstanceList trainingData, String constraintsFile, double gaussianPriorVariance, double temperature, boolean l2)
     {
         // Setup Trainer
         MaxEntGETrainer meTrainer = new MaxEntGETrainer();
 
         meTrainer.setConstraintsFile(constraintsFile);
         meTrainer.setGaussianPriorVariance(gaussianPriorVariance);
-        meTrainer.setL2(false);
+        meTrainer.setTemperature(temperature);
+        meTrainer.setL2(l2);
 
         // Train & Return Model
         MaxEnt meModel = meTrainer.train(trainingData);
