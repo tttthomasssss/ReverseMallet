@@ -481,13 +481,16 @@ public class Multinomial extends FeatureVector
             }
 			double sum = 0;
 			for (int i = 0; i < pr.length; i++) {
-        //if (dictionary != null) System.out.println (dictionary.lookupObject(i).toString()+' '+counts[i]);
-        pr[i] = counts[i] + m;
+                //if (dictionary != null) System.out.println (dictionary.lookupObject(i).toString()+' '+counts[i]);
+                pr[i] = counts[i] + m;
 				sum += pr[i];
 			}
-			for (int i = 0; i < pr.length; i++)
+
+            for (int i = 0; i < pr.length; i++) {
 				pr[i] /= sum;
-			return new Multinomial (pr, dictionary, size, false, false);			
+            }
+
+            return new Multinomial (pr, dictionary, size, false, false);
 		}
 
        private static final long serialVersionUID = 1;

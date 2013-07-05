@@ -49,8 +49,10 @@ public class Queries {
 
         Multimap<Integer, String> ret = HashMultimap.create();
         for (int li = 0; li < targetAlphabet.size(); li++) {
-            for (int rank = 0; rank < num; rank++)
+
+            for (int rank = 0; rank < num; rank++) {
                 ret.put(li, fc.getObjectAtRank(rank).toString());
+            }
         }
 
         return ret;
@@ -64,11 +66,17 @@ public class Queries {
         Alphabet dataAlphabet = ilist.getAlphabet();
         Alphabet targetAlphabet = ilist.getTargetAlphabet();
 
+        System.out.println("DATA ALPHABET: " + dataAlphabet);
+        System.out.println("TARGET ALPHABET: " + targetAlphabet);
+
         double[] lCounts = new double[targetAlphabet.size()];
         double[][] fCounts = new double[targetAlphabet.size()][dataAlphabet.size()];
         for (Instance instance : ilist) {
+            System.out.println("INSTANCE: " + instance);
             FeatureVector fv = (FeatureVector) instance.getData();
+            System.out.println("FEATURE VECTOR: " + fv);
             Labeling l = (Labeling) instance.getTarget();
+            System.out.println("LABELING: " + l + "; NUMLOCATIONS=" + l.numLocations());
             l.addTo(lCounts);
             for (int li = 0; li < l.numLocations(); li++) {
                 double val = l.value(li);

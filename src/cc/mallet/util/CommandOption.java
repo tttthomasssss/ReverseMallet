@@ -102,7 +102,7 @@ public abstract class CommandOption
 		// Commands may have a package prefix
 		if (dotIndex != -1) {
 			java.lang.String optPackageName = optFullName.substring (0, dotIndex);
-			if (owner.getPackage() != null &&
+            if (owner.getPackage() != null &&
 				! owner.getPackage().toString().endsWith(optPackageName))
 				return index;
 			optName = optFullName.substring (dotIndex+1);

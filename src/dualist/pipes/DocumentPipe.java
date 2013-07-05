@@ -41,4 +41,23 @@ public class DocumentPipe extends Pipe {
         return myPipe.newIteratorFrom(carrier);
     }
 
+    // thk22: Generated equals & hashCode
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        //DocumentPipe that = (DocumentPipe) o;
+
+        // thk22: This is useless as its just falling back on Object's equals method which simply checks for equality
+        //if (myPipe != null ? !myPipe.equals(that.myPipe) : that.myPipe != null) return false;
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        return myPipe != null ? myPipe.hashCode() : 0;
+    }
 }

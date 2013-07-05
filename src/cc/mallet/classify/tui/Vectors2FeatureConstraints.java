@@ -58,85 +58,92 @@ public class Vectors2FeatureConstraints {
   CommandOption.Double(Vectors2FeatureConstraints.class, "majority-prob", "DOUBLE",
       false, 0.9, "Probability for majority labels when using heuristic target estimation.", null);
 
+  public static void doStuff(InstanceList list)
+  {
+      // Here we will assume that we use all labeled data available.
+      ArrayList<Integer> features = null;
+      HashMap<Integer,ArrayList<Integer>> featuresAndLabels = null;
+
+      // if a features file was specified, then load features from the file
+      if (featuresFile.wasInvoked()) {
+          if (fileContainsLabels(featuresFile.value)) {
+              // better error message from dfrankow@gmail.com
+              if (targets.value.equals("oracle")) {
+                  throw new RuntimeException("with --targets oracle, features file must be unlabeled");
+              }
+              featuresAndLabels = readFeaturesAndLabelsFromFile(featuresFile.value, list.getDataAlphabet(), list.getTargetAlphabet());
+          }
+          else {
+              features = readFeaturesFromFile(featuresFile.value, list.getDataAlphabet());
+          }
+      }
+
+      // otherwise select features using specified method
+      else {
+          if (featureSelection.value.equals("infogain")) {
+              features = FeatureConstraintUtil.selectFeaturesByInfoGain(list,numConstraints.value);
+          }
+          else if (featureSelection.value.equals("lda")) {
+              try {
+                  ObjectInputStream ois = new ObjectInputStream(new FileInputStream(ldaFile.value));
+                  ParallelTopicModel lda = (ParallelTopicModel)ois.readObject();
+                  features = FeatureConstraintUtil.selectTopLDAFeatures(numConstraints.value, lda, list.getDataAlphabet());
+              }
+              catch (Exception e) {
+                  e.printStackTrace();
+              }
+          }
+          else {
+              throw new RuntimeException("Unsupported value for feature selection: " + featureSelection.value);
+          }
+      }
+
+      // If the target method is oracle, then we do not need feature "labels".
+      HashMap<Integer,double[]> constraints = null;
+
+      if (targets.value.equals("none")) {
+          constraints = new HashMap<Integer,double[]>();
+          for (int fi : features) {
+              constraints.put(fi, null);
+          }
+      }
+      else if (targets.value.equals("oracle")) {
+          constraints = FeatureConstraintUtil.setTargetsUsingData(list, features);
+      }
+      else {
+          // For other methods, we need to get feature labels, as
+          // long as they haven't been already loaded from disk.
+          if (featuresAndLabels == null) {
+              featuresAndLabels = FeatureConstraintUtil.labelFeatures(list,features);
+
+              for (int fi : featuresAndLabels.keySet()) {
+                  logger.info(list.getDataAlphabet().lookupObject(fi) + ":  ");
+                  for (int li : featuresAndLabels.get(fi)) {
+                      logger.info(list.getTargetAlphabet().lookupObject(li) + " ");
+                  }
+              }
+
+          }
+          if (targets.value.equals("heuristic")) {
+              constraints = FeatureConstraintUtil.setTargetsUsingHeuristic(featuresAndLabels,list.getTargetAlphabet().size(),majorityProb.value);
+          }
+          else if (targets.value.equals("voted")) {
+              constraints = FeatureConstraintUtil.setTargetsUsingFeatureVoting(featuresAndLabels,list);
+          }
+          else {
+              throw new RuntimeException("Unsupported value for targets: " + targets.value);
+          }
+      }
+      writeConstraints(constraints,constraintsFile.value,list.getDataAlphabet(),list.getTargetAlphabet());
+  }
+
   public static void main(String[] args) {
     CommandOption.process(Vectors2FeatureConstraints.class, args);
     InstanceList list = InstanceList.load(vectorsFile.value);  
-    
-    // Here we will assume that we use all labeled data available.  
-    ArrayList<Integer> features = null;
-    HashMap<Integer,ArrayList<Integer>> featuresAndLabels = null;
 
-    // if a features file was specified, then load features from the file
-    if (featuresFile.wasInvoked()) {
-      if (fileContainsLabels(featuresFile.value)) {
-      	// better error message from dfrankow@gmail.com
-        if (targets.value.equals("oracle")) {
-      	  throw new RuntimeException("with --targets oracle, features file must be unlabeled");
-        }
-        featuresAndLabels = readFeaturesAndLabelsFromFile(featuresFile.value, list.getDataAlphabet(), list.getTargetAlphabet());
-      }
-      else {
-        features = readFeaturesFromFile(featuresFile.value, list.getDataAlphabet());        
-      }
-    }
-    
-    // otherwise select features using specified method
-    else {
-      if (featureSelection.value.equals("infogain")) {
-        features = FeatureConstraintUtil.selectFeaturesByInfoGain(list,numConstraints.value);
-      }
-      else if (featureSelection.value.equals("lda")) {
-        try {
-          ObjectInputStream ois = new ObjectInputStream(new FileInputStream(ldaFile.value));
-          ParallelTopicModel lda = (ParallelTopicModel)ois.readObject();
-          features = FeatureConstraintUtil.selectTopLDAFeatures(numConstraints.value, lda, list.getDataAlphabet());
-        }
-        catch (Exception e) {
-          e.printStackTrace();
-        }
-      }
-      else {
-        throw new RuntimeException("Unsupported value for feature selection: " + featureSelection.value);
-      }
-    }
-    
-    // If the target method is oracle, then we do not need feature "labels".
-    HashMap<Integer,double[]> constraints = null;
-    
-    if (targets.value.equals("none")) {
-      constraints = new HashMap<Integer,double[]>();
-      for (int fi : features) {     
-        constraints.put(fi, null);
-      }
-    }
-    else if (targets.value.equals("oracle")) {
-      constraints = FeatureConstraintUtil.setTargetsUsingData(list, features);
-    }
-    else {
-      // For other methods, we need to get feature labels, as
-      // long as they haven't been already loaded from disk.
-      if (featuresAndLabels == null) {
-        featuresAndLabels = FeatureConstraintUtil.labelFeatures(list,features);
-        
-        for (int fi : featuresAndLabels.keySet()) {
-          logger.info(list.getDataAlphabet().lookupObject(fi) + ":  ");
-          for (int li : featuresAndLabels.get(fi)) {
-            logger.info(list.getTargetAlphabet().lookupObject(li) + " ");
-          }
-        }
-        
-      }
-      if (targets.value.equals("heuristic")) {
-        constraints = FeatureConstraintUtil.setTargetsUsingHeuristic(featuresAndLabels,list.getTargetAlphabet().size(),majorityProb.value);
-      }
-      else if (targets.value.equals("voted")) {
-        constraints = FeatureConstraintUtil.setTargetsUsingFeatureVoting(featuresAndLabels,list);
-      }
-      else {
-        throw new RuntimeException("Unsupported value for targets: " + targets.value);
-      }
-    }
-    writeConstraints(constraints,constraintsFile.value,list.getDataAlphabet(),list.getTargetAlphabet());  
+    //thk22!!!
+    doStuff(list);
+
   }
   
   private static boolean fileContainsLabels(File file) {

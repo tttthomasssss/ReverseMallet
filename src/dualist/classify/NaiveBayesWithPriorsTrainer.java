@@ -191,10 +191,6 @@ public class NaiveBayesWithPriorsTrainer extends ClassifierTrainer<NaiveBayes> i
         System.out.println("INSTANCE LIST COUNT: " + trainingInstancesToAdd.size());
         System.out.println("INSTANCES...");
 
-        for (Instance i : trainingInstancesToAdd) {
-            System.out.println("### INSTANCE: " + i.toString());
-        }
-
         // Initialize and check instance variables as necessary...
         setup(trainingInstancesToAdd, null);
 
@@ -237,10 +233,12 @@ public class NaiveBayesWithPriorsTrainer extends ClassifierTrainer<NaiveBayes> i
         if (instances != null) {
             if (instancePipe == null)
                 instancePipe = instances.getPipe();
-            else if (instancePipe != instances.getPipe())
-                // Make sure that this pipes match.  Is this really necessary??  
+            //else if (instancePipe != instances.getPipe()) { // thk22: Why would you want to check for IDENTITY rather than EQUALITY???? Am sure this is a bug...#OOFail
+            else if (!instancePipe.equals(instances.getPipe())) { // thk22: replaced above check by equality check
+                // Make sure that this pipes match.  Is this really necessary??
                 // I don't think so, but it could be confusing to have each returned classifier have a different pipe?  -akm 1/08
                 throw new IllegalArgumentException ("Training set pipe does not match that of NaiveBayesTrainer.");
+            }
         }
 
         if (me == null) {
@@ -302,19 +300,28 @@ public class NaiveBayesWithPriorsTrainer extends ClassifierTrainer<NaiveBayes> i
         if (labelFeatures != null) {
             filterlabelFeatures();
             for (Object label : labelFeatures.keySet()) {
+
                 int li = targetAlphabet.lookupIndex(label);
                 for (Object feature : labelFeatures.get(label)) {
+
                     int fi = dataAlphabet.lookupIndex(feature);
+
                     me[li].increment(fi, alpha);
                 }
             }
         }		
 
+        System.out.println("########################################### START");
         // now estimate conditionals from data
+
+        System.out.println("### NUMLABELS: " + numLabels);
+        System.out.println("### M SIZE: " + m.length);
+
         for (int li = 0; li < numLabels; li++) {
             m[li] = me[li].estimate();
-            //			System.out.println(m[li]);
         }
+
+        System.out.println("########################################### END");
 
         return m;
     }
