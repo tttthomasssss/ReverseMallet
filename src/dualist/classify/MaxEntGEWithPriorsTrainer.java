@@ -8,12 +8,13 @@ import cc.mallet.classify.constraints.ge.MaxEntL2FLGEConstraints;
 import cc.mallet.optimize.LimitedMemoryBFGS;
 import cc.mallet.optimize.Optimizable;
 import cc.mallet.optimize.Optimizer;
-import cc.mallet.types.InstanceList;
-import cc.mallet.types.Multinomial;
+import cc.mallet.types.*;
+import com.google.common.collect.HashMultimap;
 
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Set;
 
 /**
  * Created with IntelliJ IDEA.
@@ -23,14 +24,14 @@ import java.util.HashMap;
  * To change this template use File | Settings | File Templates.
  */
 public class MaxEntGEWithPriorsTrainer
-extends ClassifierTrainer<MaxEnt>
-implements ClassifierTrainer.ByOptimization<MaxEnt>, Boostable, Serializable
+        extends ClassifierTrainer<MaxEnt>
+        implements ClassifierTrainer.ByOptimization<MaxEnt>, Boostable, Serializable
 {
     // These function as default selections for the kind of Estimator used
     // Other than Settles, I am trying to use the estimates to bootstrap constraints for the model
     // Further, instead of LaplaceEstimators I use MLEstimators which have a default value of 0 rather than 1
     Multinomial.Estimator featureEstimator = new Multinomial.MLEstimator();
-    Multinomial.Estimator priorEstimator = new Multinomial.LaplaceEstimator();
+    Multinomial.Estimator priorEstimator = new Multinomial.LaplaceEstimator();//new Multinomial.MLEstimator();
 
     Multinomial.Estimator[] me;
     Multinomial.Estimator pe;
@@ -47,11 +48,25 @@ implements ClassifierTrainer.ByOptimization<MaxEnt>, Boostable, Serializable
 
     private double temperature = 1.0;
     private double gaussianPriorVariance = 1.0;
+    private double defaultMajorityProb = 0.9;
+    private double constraintWeight = 1.0;
+    private double docLengthNormalization = -1;  // A value of -1 means don't do any document length normalization
     private int numIterations = 0;
     private int maxIterations = Integer.MAX_VALUE;
 
     protected ArrayList<MaxEntGEConstraint> constraints;
     private String constraintsFile;
+
+    public MaxEntGEWithPriorsTrainer()
+    {
+        super();
+    }
+
+    public MaxEntGEWithPriorsTrainer(ArrayList<MaxEntGEConstraint> constraints)
+    {
+        super();
+        this.constraints = constraints;
+    }
 
     public Optimizable.ByGradientValue getOptimizable (InstanceList trainingList) {
         if (generalizedExpectation == null) {
@@ -78,35 +93,26 @@ implements ClassifierTrainer.ByOptimization<MaxEnt>, Boostable, Serializable
         return numIterations;
     }
 
-    public MaxEnt train(InstanceList trainingList)
+    public MaxEnt train(InstanceList trainingList, InstanceList labeledSet, HashMultimap<Integer, String> labeledFeatures)
     {
-        return this.train(trainingList, maxIterations);
+        return this.train(trainingList, labeledSet, labeledFeatures, maxIterations);
     }
 
-    public MaxEnt train(InstanceList trainingList, int maxIterations)
+    public MaxEnt train(InstanceList trainingList, InstanceList labeledSet, HashMultimap<Integer, String> labeledFeatures, int maxIterations)
     {
-        if (constraints == null && constraintsFile != null) {
-
-            HashMap<Integer, double[]> constraintsMap = FeatureConstraintUtil.readConstraintsFromFile(constraintsFile, trainingList);
-
-            constraints = new ArrayList<MaxEntGEConstraint>();
-
-            MaxEntFLGEConstraints geConstraints = (l2) ? new MaxEntL2FLGEConstraints(trainingList.getDataAlphabet().size(), trainingList.getTargetAlphabet().size(), useValues, normalize) : new MaxEntKLFLGEConstraints(trainingList.getDataAlphabet().size(), trainingList.getTargetAlphabet().size(), useValues);
-
-            for (int fi : constraintsMap.keySet()) {
-                geConstraints.addConstraint(fi, constraintsMap.get(fi), 1);
-            }
-            constraints.add(geConstraints);
-        }
+        this.constraints = (constraints == null && constraintsFile != null) ? this.createConstraintsFromFile(trainingList) : this.createConstraints(trainingList, labeledFeatures, this.defaultMajorityProb);
 
         this.setupEstimationEngine(trainingList);
 
-        // Estimate Label Priors
-        // We are solely interested in the labeled Instances here, the labeled Features are incorporated in the model just fine, its the instances stupid!
-        //check the incorporateOneInstance method of how to incorporate one more instance into the model and update the expectations, then use these expectations to derive constraint probabilites!!!
-        Multinomial estimation = pe.estimate();
-        //Multinomial[] featureEstimation =
-        //this.estimateConstraints()
+        if (labeledSet.size() > 0) {
+            for (Instance labeledInstance : labeledSet) {
+                this.incorporateOneInstance(labeledInstance, trainingList.getInstanceWeight(labeledInstance), labeledFeatures);
+            }
+
+            HashMultimap<Integer, String> labeledInstances = this.addConstraintEstimations(trainingList, labeledFeatures);
+
+            this.constraints.addAll(this.createConstraints(trainingList, labeledInstances, 0.8));
+        }
 
         // Don't blame me for the code down there, been pretty much taken from the original MaxEntGERangeTrainer
         getOptimizable(trainingList);
@@ -139,6 +145,16 @@ implements ClassifierTrainer.ByOptimization<MaxEnt>, Boostable, Serializable
         classifier = generalizedExpectation.getClassifier();
 
         return classifier;
+    }
+
+    public MaxEnt train(InstanceList trainingList)
+    {
+        return this.train(trainingList, null, null, maxIterations);
+    }
+
+    public MaxEnt train(InstanceList trainingList, int maxIterations)
+    {
+        return this.train(trainingList, null, null, maxIterations);
     }
 
     public MaxEnt getClassifier()
@@ -174,46 +190,153 @@ implements ClassifierTrainer.ByOptimization<MaxEnt>, Boostable, Serializable
             me = newMe;
         }
     }
-    /*
-    private Multinomial[] estimateFeatureMultinomials () {
-        int numLabels = targetAlphabet.size();
-        Multinomial[] m = new Multinomial[numLabels];
 
-        // first add all the appropriate pseudocounts (derived from feature labels)
-        // to the multinomial estimator
-        if (labelFeatures != null) {
-            filterlabelFeatures();
-            for (Object label : labelFeatures.keySet()) {
+    private void incorporateOneInstance(Instance instance, double instanceWeight, HashMultimap<Integer, String> labeledFeatures)
+    {
+        Labeling labeling = instance.getLabeling ();
+        if (labeling == null) return; // Handle unlabeled instances by skipping them
+        FeatureVector fv = (FeatureVector) instance.getData ();
 
-                int li = targetAlphabet.lookupIndex(label);
-                for (Object feature : labelFeatures.get(label)) {
+        double oneNorm = fv.oneNorm();
+        if (oneNorm <= 0) return; // Skip instances that have no features present
+        if (docLengthNormalization > 0)
+            // Make the document have counts that sum to docLengthNormalization
+            // I.e., if 20, it would be as if the document had 20 words.
+            instanceWeight *= docLengthNormalization / oneNorm;
+        assert (instanceWeight > 0 && !Double.isInfinite(instanceWeight));
+        for (int lpos = 0; lpos < labeling.numLocations(); lpos++) {
+            int li = labeling.indexAtLocation (lpos);
+            double labelWeight = labeling.valueAtLocation (lpos);
+            if (labelWeight == 0) continue;
 
-                    int fi = dataAlphabet.lookupIndex(feature);
+            // Add a bias to every feature in a labeled instance in case they co occur with a labeled feature
+            //fv = this.biasFeatureVector(fv, li, labeledFeatures);
 
-                    System.out.println("MULTINOMIAL ESTIMATION OF FEATURE[" + feature + "] WITH LABEL[" + label + "] BEFORE INCREMENTING WITH ALPHA[" + alpha + "]: " + me[li].getCount(fi));
-                    me[li].increment(fi, alpha);
-                    System.out.println("MULTINOMIAL ESTIMATION OF FEATURE[" + feature + "] WITH LABEL[" + label + "] AFTER INCREMENTING WITH ALPHA[" + alpha + "]: " + me[li].getCount(fi));
+            me[li].increment (fv, labelWeight * instanceWeight);
+            // This relies on labelWeight summing to 1 over all labels
+            pe.increment (li, labelWeight * instanceWeight);
+        }
+    }
+
+    private ArrayList<MaxEntGEConstraint> createConstraints(InstanceList trainingList, HashMultimap<Integer, String> labeledFeatures, double majorityProb)
+    {
+        ArrayList<MaxEntGEConstraint> currConstraints = new ArrayList<MaxEntGEConstraint>();
+
+        // L2 Penalty?
+        MaxEntFLGEConstraints geConstraints = (l2) ? new MaxEntL2FLGEConstraints(trainingList.getDataAlphabet().size(), trainingList.getTargetAlphabet().size(), useValues, normalize) : new MaxEntKLFLGEConstraints(trainingList.getDataAlphabet().size(), trainingList.getTargetAlphabet().size(), useValues);
+
+        // Clear & Rebuild
+        double[] probs;
+        double minorityProb = (1 - majorityProb) / (trainingList.getTargetAlphabet().size() - 1);
+
+        for (int li : labeledFeatures.keySet()) {
+
+            if (li >= 0) {
+                // Fill the Constraints
+                probs = new double[trainingList.getTargetAlphabet().size()];
+
+                // Majority Probability for current Label
+                probs[li] = majorityProb;
+
+                // Minority Probabilities for all the other Labels
+                for (int i = 0; i < li; i++) {
+                    probs[i] = minorityProb;
+                }
+                for (int i = (li + 1); i < probs.length; i++) {
+                    probs[i] =  minorityProb;
+                }
+
+                // Finally collect the constraints
+                for (String featureName : labeledFeatures.get(li)) {
+                    geConstraints.addConstraint(trainingList.getDataAlphabet().lookupIndex(featureName, false), probs, constraintWeight);
                 }
             }
         }
 
-        System.out.println("########################################### START");
-        // now estimate conditionals from data
+        currConstraints.add(geConstraints);
 
-        System.out.println("### NUMLABELS: " + numLabels);
-        System.out.println("### M SIZE: " + m.length);
+        return currConstraints;
+    }
 
-        for (int li = 0; li < numLabels; li++) {
-            m[li] = me[li].estimate();
+    private ArrayList<MaxEntGEConstraint> createConstraintsFromFile(InstanceList trainingList)
+    {
+        HashMap<Integer, double[]> constraintsMap = FeatureConstraintUtil.readConstraintsFromFile(constraintsFile, trainingList);
+
+        ArrayList<MaxEntGEConstraint> currConstraints = new ArrayList<MaxEntGEConstraint>();
+
+        MaxEntFLGEConstraints geConstraints = (l2) ? new MaxEntL2FLGEConstraints(trainingList.getDataAlphabet().size(), trainingList.getTargetAlphabet().size(), useValues, normalize) : new MaxEntKLFLGEConstraints(trainingList.getDataAlphabet().size(), trainingList.getTargetAlphabet().size(), useValues);
+
+        for (int fi : constraintsMap.keySet()) {
+            geConstraints.addConstraint(fi, constraintsMap.get(fi), 1);
         }
 
-        System.out.println("########################################### END");
+        currConstraints.add(geConstraints);
 
-        return m;
+        return currConstraints;
     }
-      */
+
+    /**
+     * If a feature in a labeled Instance co-occurs with a labeled Feature, we bias all the features in that Instance for every co-occurrence by a well-contemplated(=http://xkcd.com/221/) value
+     * @param fv
+     * @param labelIndex
+     * @param labeledFeatures
+     * @return
+     */
+    private FeatureVector biasFeatureVector(FeatureVector fv, int labelIndex, HashMultimap<Integer, String> labeledFeatures)
+    {
+        if (labelIndex >= 0) {
+            for (String feature : labeledFeatures.get(labelIndex)) {
+                if (fv.contains(feature)) {
+                    for (int idx : fv.getIndices()) {
+                        fv.setValue(idx, fv.value(idx) + 50);
+                    }
+                }
+            }
+        }
+        return fv;
+    }
+
+    private HashMultimap<Integer, String> addConstraintEstimations(InstanceList trainingList, HashMultimap<Integer, String> labeledFeatures)
+    {
+        Multinomial[] m = new Multinomial[trainingList.getTargetAlphabet().size()];
+
+        for (int labelIndex = 0; labelIndex < trainingList.getTargetAlphabet().size(); labelIndex++) {
+            m[labelIndex] = me[labelIndex].estimate();
+        }
+
+        HashMultimap<Integer, String> labeledInstances = HashMultimap.create();
+
+        // TODO: This is still very ugly because its restricted to binary decisions
+        for (int i = 0; i < trainingList.getDataAlphabet().size(); i++) {
+            if (Math.abs(m[0].value(i) - m[1].value(i)) > 0.001 && !labeledFeatures.get((m[0].value(i) > m[1].value(i) ? 0 : 1)).contains(trainingList.getDataAlphabet().lookupObject(i))) {
+                labeledInstances.put((m[0].value(i) > m[1].value(i) ? 0 : 1), (String)trainingList.getDataAlphabet().lookupObject(i));
+            }
+        }
+
+        return labeledInstances;
+    }
 
     //-- Getter/Setter Business...so much ado 'bout nuthin' --//
+
+    public double getConstraintWeight()
+    {
+        return this.constraintWeight;
+    }
+
+    public void setConstraintWeight(double constraintWeight)
+    {
+        this.constraintWeight = constraintWeight;
+    }
+
+    public double getMajorityProb()
+    {
+        return this.defaultMajorityProb;
+    }
+
+    public void setMajorityProb(double majorityProb)
+    {
+        this.defaultMajorityProb = majorityProb;
+    }
 
     public int getMaxIterations() {
         return maxIterations;
